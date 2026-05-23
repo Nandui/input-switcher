@@ -238,8 +238,22 @@ if IS_MAC:
                 sender.state = 1
 
         def _install_agent(self):
-            python = sys.executable
-            script = str(Path(__file__).resolve())
+            if getattr(sys, "frozen", False):
+                # PyInstaller bundle — launch the bundle binary directly
+                program_args = f"<string>{sys.executable}</string>"
+            else:
+                # Shell-script .app bundle: prefer the bundle launcher so the
+                # LaunchAgent sets up the venv properly on each login
+                script_path = Path(__file__).resolve()
+                bundle_launcher = script_path.parent.parent / "MacOS" / "InputSwitcher"
+                if bundle_launcher.exists():
+                    program_args = f"<string>{bundle_launcher}</string>"
+                else:
+                    python = sys.executable
+                    program_args = (
+                        f"<string>{python}</string>\n"
+                        f"    <string>{script_path}</string>"
+                    )
             plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -247,8 +261,7 @@ if IS_MAC:
   <key>Label</key>             <string>{_AGENT_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>{python}</string>
-    <string>{script}</string>
+    {program_args}
   </array>
   <key>EnvironmentVariables</key>
   <dict>

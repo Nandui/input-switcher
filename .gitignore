@@ -4,5 +4,6 @@ config.json
 InputSwitcher.zip
 .venv/
 build/
-*.spec
-InputSwitcher.spec
+.build-venv/
+dist/*.app/
+dist/dmg-staging/
