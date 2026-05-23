@@ -5,5 +5,4 @@ InputSwitcher.zip
 
 # PyInstaller build artifacts
 build/
-dist/
 *.spec
