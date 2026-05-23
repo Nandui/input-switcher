@@ -239,15 +239,21 @@ if IS_MAC:
 
         def _install_agent(self):
             if getattr(sys, "frozen", False):
-                # Bundled .app — launch the bundle binary directly
+                # PyInstaller bundle — launch the bundle binary directly
                 program_args = f"<string>{sys.executable}</string>"
             else:
-                python = sys.executable
-                script = str(Path(__file__).resolve())
-                program_args = (
-                    f"<string>{python}</string>\n"
-                    f"    <string>{script}</string>"
-                )
+                # Shell-script .app bundle: prefer the bundle launcher so the
+                # LaunchAgent sets up the venv properly on each login
+                script_path = Path(__file__).resolve()
+                bundle_launcher = script_path.parent.parent / "MacOS" / "InputSwitcher"
+                if bundle_launcher.exists():
+                    program_args = f"<string>{bundle_launcher}</string>"
+                else:
+                    python = sys.executable
+                    program_args = (
+                        f"<string>{python}</string>\n"
+                        f"    <string>{script_path}</string>"
+                    )
             plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

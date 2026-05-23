@@ -5,3 +5,5 @@ InputSwitcher.zip
 .venv/
 build/
 .build-venv/
+dist/*.app/
+dist/dmg-staging/
