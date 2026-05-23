@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Input Switcher — macOS launcher
-# Run once: bash run_mac.sh
-# After that you can double-click it or keep using: bash run_mac.sh
-
+# Input Switcher — macOS launcher (menu bar widget)
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Input Switcher — MSI 321URX"
 echo "----------------------------"
 
-# ── 1. Find a usable Python 3.9+ ──────────────────────────────────────────
+# ── 1. Find Python 3.9+ ───────────────────────────────────────────────────────
 PYTHON=""
 for candidate in python3 python; do
   if command -v "$candidate" &>/dev/null; then
@@ -22,29 +19,41 @@ for candidate in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo ""
   echo "ERROR: Python 3.9 or newer not found."
-  echo "Install it from https://www.python.org  or via Homebrew:"
-  echo "  brew install python"
+  echo "Install from https://www.python.org  or:  brew install python3"
   exit 1
 fi
-
 echo "Python: $($PYTHON --version)"
 
-# ── 2. Check tkinter (ships with python.org builds; missing on some Homebrew installs) ──
-if ! $PYTHON -c "import tkinter" &>/dev/null; then
+# ── 2. Check for m1ddc ────────────────────────────────────────────────────────
+if ! command -v m1ddc &>/dev/null; then
   echo ""
-  echo "ERROR: tkinter not found."
-  echo "Fix options:"
-  echo "  • Homebrew Python:  brew install python-tk"
-  echo "  • Or install Python from https://www.python.org (includes Tk)"
-  exit 1
+  echo "m1ddc not found — required for DDC/CI on Apple Silicon."
+  if command -v brew &>/dev/null; then
+    echo "Installing via Homebrew…"
+    brew install m1ddc
+  else
+    echo "ERROR: Install Homebrew first (https://brew.sh), then:"
+    echo "  brew install m1ddc"
+    exit 1
+  fi
 fi
 
-# ── 3. Install / upgrade monitorcontrol ───────────────────────────────────
-echo "Checking dependencies…"
-$PYTHON -m pip install --quiet --upgrade monitorcontrol
+# ── 3. Set up a local venv and install rumps ─────────────────────────────────
+VENV="$DIR/.venv"
+if [ ! -d "$VENV" ]; then
+  echo "Creating virtual environment…"
+  $PYTHON -m venv "$VENV"
+fi
+PY="$VENV/bin/python"
 
-# ── 4. Launch ─────────────────────────────────────────────────────────────
-echo "Launching…"
-$PYTHON "$DIR/input_switcher.py"
+if ! "$PY" -c "import rumps" &>/dev/null; then
+  echo "Installing rumps…"
+  "$PY" -m pip install --quiet rumps
+fi
+
+# ── 4. Launch detached (terminal can be closed immediately) ──────────────────
+echo "Launching menu bar widget…"
+nohup "$PY" "$DIR/input_switcher.py" > /tmp/msi-input-switcher.log 2>&1 &
+disown
+echo "Done — you can close this terminal. Logs: /tmp/msi-input-switcher.log"

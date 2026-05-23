@@ -2,8 +2,7 @@ __pycache__/
 *.pyc
 config.json
 InputSwitcher.zip
-
-# PyInstaller build artifacts
+.venv/
 build/
 dist/
 *.spec
