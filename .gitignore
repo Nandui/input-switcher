@@ -5,3 +5,4 @@ InputSwitcher.zip
 .venv/
 build/
 *.spec
+InputSwitcher.spec
