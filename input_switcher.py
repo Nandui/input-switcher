@@ -1,41 +1,49 @@
 #!/usr/bin/env python3
-from __future__ import annotations   # Python 3.9 compat for | union hints
+from __future__ import annotations
 """
-Input Switcher — MSI 321URX
-Switches the active input via DDC/CI. Works on Windows and macOS.
+Input Switcher — MSI MAG 321URX
+Switches the active input via DDC/CI.
+Windows: auto-detects by DDC model name "FALCON".
+macOS:   one-time picker on first run, saves choice to config.json.
 """
 import json
 import sys
-import tkinter as tk
-from tkinter import ttk, messagebox
 import threading
 from pathlib import Path
 
 try:
-    from monitorcontrol import get_monitors, InputSource
+    import customtkinter as ctk
 except ImportError:
-    print("Run:  pip install monitorcontrol")
+    print("Run: pip install customtkinter")
     sys.exit(1)
 
+try:
+    from monitorcontrol import get_monitors, InputSource
+except ImportError:
+    print("Run: pip install monitorcontrol")
+    sys.exit(1)
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+# ----------------------------------------------------------------- constants -
+
 CONFIG_FILE = Path(__file__).with_name("config.json")
+KNOWN_MODELS: set[str] = {"FALCON"}   # DDC model name on Windows
 
-# Known DDC model strings for the MSI 321URX.
-# "FALCON" = Windows. The macOS name is learned on first run and saved.
-KNOWN_MODELS: set[str] = {"FALCON"}
-
-INPUTS = [
-    InputSource.DP1,
-    InputSource.DP2,
-    InputSource.HDMI1,
-    InputSource.HDMI2,
-]
-
+INPUTS = [InputSource.DP1, InputSource.DP2, InputSource.HDMI1, InputSource.HDMI2]
 INPUT_LABELS = {
     InputSource.DP1:   "DisplayPort 1",
     InputSource.DP2:   "DisplayPort 2",
     InputSource.HDMI1: "HDMI 1",
     InputSource.HDMI2: "HDMI 2",
 }
+
+BTN_W, BTN_H = 130, 64
+COLOR_ACTIVE   = ("#1a6fc4", "#1a6fc4")
+COLOR_INACTIVE = ("#2b2b2b", "#2b2b2b")
+COLOR_HOVER_A  = ("#2178d0", "#2178d0")
+COLOR_HOVER_I  = ("#3a3a3a", "#3a3a3a")
 
 
 # ------------------------------------------------------------------ helpers --
@@ -52,18 +60,15 @@ def save_config(data: dict) -> None:
 
 
 def scan_all_monitors() -> list[dict]:
-    """Return [{index, model, inputs}] for every DDC-capable monitor."""
     results = []
     for i, mon in enumerate(get_monitors()):
         with mon:
             try:
                 caps = mon.get_vcp_capabilities()
                 model = caps.get("model", "").strip() or f"Monitor {i + 1}"
-                raw_inputs = caps.get("inputs") or []
-                inputs = [s.value for s in raw_inputs]
+                inputs = [s.value for s in (caps.get("inputs") or [])]
             except Exception:
-                model = f"Monitor {i + 1}"
-                inputs = []
+                model, inputs = f"Monitor {i + 1}", []
             results.append({"index": i, "model": model, "inputs": inputs})
     return results
 
@@ -75,45 +80,47 @@ def find_msi(monitors: list[dict], known: set[str]) -> dict | None:
     return None
 
 
-# ------------------------------------------------------ one-time picker dlg --
+# ------------------------------------------------- macOS first-run picker ---
 
-class PickerDialog(tk.Toplevel):
-    """Shown once on macOS (or any OS) when auto-detection fails."""
+class PickerDialog(ctk.CTkToplevel):
+    """Shown once on macOS when auto-detection fails."""
 
-    def __init__(self, parent: tk.Tk, monitors: list[dict]):
+    def __init__(self, parent, monitors: list[dict]):
         super().__init__(parent)
-        self.title("Select your MSI 321URX")
+        self.title("Select monitor")
         self.resizable(False, False)
         self.grab_set()
         self.result: dict | None = None
+        self._monitors = monitors
+        self._var = ctk.IntVar(value=-1)
 
-        ttk.Label(
+        ctk.CTkLabel(
             self,
             text="Could not auto-detect the MSI 321URX.\nSelect it from the list below:",
             justify="left",
-        ).pack(padx=16, pady=(14, 6), anchor="w")
+            font=ctk.CTkFont(size=13),
+        ).pack(padx=20, pady=(18, 10), anchor="w")
 
-        self._var = tk.IntVar(value=-1)
         for m in monitors:
-            label = f'{m["model"]}  (monitor {m["index"] + 1})'
-            ttk.Radiobutton(self, text=label, variable=self._var, value=m["index"]).pack(
-                anchor="w", padx=20, pady=2
-            )
+            ctk.CTkRadioButton(
+                self,
+                text=f'{m["model"]}  (monitor {m["index"] + 1})',
+                variable=self._var,
+                value=m["index"],
+                command=lambda: self._ok_btn.configure(state="normal"),
+            ).pack(anchor="w", padx=24, pady=4)
 
-        bar = ttk.Frame(self)
-        bar.pack(fill="x", padx=16, pady=(8, 12))
-        ttk.Button(bar, text="Cancel", command=self.destroy).pack(side="right", padx=(4, 0))
-        self._ok_btn = ttk.Button(bar, text="This is my MSI", command=self._confirm)
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=20, pady=(12, 16))
+        ctk.CTkButton(bar, text="Cancel", width=90, fg_color="transparent",
+                      border_width=1, command=self.destroy).pack(side="right", padx=(6, 0))
+        self._ok_btn = ctk.CTkButton(bar, text="This is my MSI", width=130,
+                                     state="disabled", command=self._confirm)
         self._ok_btn.pack(side="right")
 
-        self._monitors = monitors
-        self._var.trace_add("write", lambda *_: self._ok_btn.config(state="normal"))
-        self._ok_btn.config(state="disabled")
-
-        # Center over parent
         self.update_idletasks()
-        px, py = parent.winfo_x(), parent.winfo_y()
         pw, ph = parent.winfo_width(), parent.winfo_height()
+        px, py = parent.winfo_x(), parent.winfo_y()
         w, h = self.winfo_width(), self.winfo_height()
         self.geometry(f"+{px + (pw - w)//2}+{py + (ph - h)//2}")
         self.wait_window()
@@ -124,23 +131,23 @@ class PickerDialog(tk.Toplevel):
         self.destroy()
 
 
-# --------------------------------------------------------------- main window --
+# ----------------------------------------------------------------- main app --
 
-class App(tk.Tk):
+class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("MSI 321URX — Input Switcher")
+        self.title("Input Switcher")
         self.resizable(False, False)
 
         self._cfg = load_config()
-        # Merge any previously learned model name
-        saved_model: str | None = self._cfg.get("model")
-        if saved_model:
-            KNOWN_MODELS.add(saved_model.upper())
+        saved = self._cfg.get("model")
+        if saved:
+            KNOWN_MODELS.add(saved.upper())
 
         self._monitor_idx: int | None = None
         self._current: int | None = None
-        self._selected = tk.IntVar()
+        self._btns: dict[int, ctk.CTkButton] = {}
+        self._busy = False
 
         self._build_ui()
         self._refresh()
@@ -148,45 +155,82 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ UI --
 
     def _build_ui(self):
-        outer = ttk.Frame(self, padding=14)
-        outer.pack(fill="both", expand=True)
+        # ── header ──────────────────────────────────────────────────────────
+        ctk.CTkLabel(
+            self,
+            text="MSI MAG 321URX",
+            font=ctk.CTkFont(size=17, weight="bold"),
+        ).pack(pady=(22, 2))
 
-        btn_frame = ttk.LabelFrame(outer, text="Input Source", padding=(10, 6))
-        btn_frame.pack(fill="x")
+        ctk.CTkLabel(
+            self,
+            text="SELECT INPUT SOURCE",
+            font=ctk.CTkFont(size=10),
+            text_color="#888888",
+        ).pack(pady=(0, 14))
 
-        self._radios: list[ttk.Radiobutton] = []
-        for src in INPUTS:
-            rb = ttk.Radiobutton(
-                btn_frame,
+        # ── 2×2 button grid ─────────────────────────────────────────────────
+        grid = ctk.CTkFrame(self, fg_color="transparent")
+        grid.pack(padx=20)
+
+        for i, src in enumerate(INPUTS):
+            row, col = divmod(i, 2)
+            btn = ctk.CTkButton(
+                grid,
                 text=INPUT_LABELS[src],
-                variable=self._selected,
-                value=src.value,
-                command=self._on_pick,
+                width=BTN_W,
+                height=BTN_H,
+                corner_radius=10,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                fg_color=COLOR_INACTIVE,
+                hover_color=COLOR_HOVER_I,
                 state="disabled",
+                command=lambda s=src: self._on_click(s),
             )
-            rb.pack(anchor="w", pady=3)
-            self._radios.append(rb)
+            btn.grid(row=row, column=col, padx=6, pady=6)
+            self._btns[src.value] = btn
 
-        bar = ttk.Frame(outer)
-        bar.pack(fill="x", pady=(10, 0))
+        # ── status + refresh ─────────────────────────────────────────────────
+        self._status_var = ctk.StringVar(value="Scanning…")
+        ctk.CTkLabel(
+            self,
+            textvariable=self._status_var,
+            font=ctk.CTkFont(size=11),
+            text_color="#888888",
+        ).pack(pady=(14, 4))
 
-        self._status_var = tk.StringVar(value="Scanning…")
-        ttk.Label(bar, textvariable=self._status_var, foreground="gray").pack(
-            side="left", fill="x", expand=True
-        )
-        ttk.Button(bar, text="↺", width=3, command=self._refresh).pack(side="left", padx=(6, 4))
-        self._switch_btn = ttk.Button(bar, text="Switch", command=self._switch, state="disabled")
-        self._switch_btn.pack(side="right")
+        ctk.CTkButton(
+            self,
+            text="↺  Refresh",
+            width=110,
+            height=28,
+            corner_radius=6,
+            font=ctk.CTkFont(size=11),
+            fg_color="transparent",
+            border_width=1,
+            border_color="#444444",
+            hover_color="#2b2b2b",
+            command=self._refresh,
+        ).pack(pady=(0, 20))
 
-    def _set_radios(self, state: str):
-        for rb in self._radios:
-            rb.config(state=state)
+    def _set_state(self, state: str):
+        for btn in self._btns.values():
+            btn.configure(state=state)
+
+    def _highlight(self, current: int | None):
+        for val, btn in self._btns.items():
+            if val == current:
+                btn.configure(fg_color=COLOR_ACTIVE, hover_color=COLOR_HOVER_A)
+            else:
+                btn.configure(fg_color=COLOR_INACTIVE, hover_color=COLOR_HOVER_I)
 
     # ------------------------------------------------------------ scanning --
 
     def _refresh(self):
-        self._set_radios("disabled")
-        self._switch_btn.config(state="disabled")
+        if self._busy:
+            return
+        self._busy = True
+        self._set_state("disabled")
         self._status("Scanning…")
         threading.Thread(target=self._scan, daemon=True).start()
 
@@ -198,9 +242,7 @@ class App(tk.Tk):
             return
 
         found = find_msi(monitors, KNOWN_MODELS)
-
         if found is None:
-            # Ask the user once, on the UI thread
             self.after(0, self._ask_user_pick, monitors)
             return
 
@@ -208,66 +250,49 @@ class App(tk.Tk):
 
     def _ask_user_pick(self, monitors: list[dict]):
         if not monitors:
-            self._on_error("No DDC-capable monitors found.\nEnable DDC/CI in your monitor's OSD.")
+            self._on_error("No DDC-capable monitors found.\nEnable DDC/CI in the monitor OSD.")
             return
-
         dlg = PickerDialog(self, monitors)
         if dlg.result is None:
+            self._busy = False
             self._status("Cancelled.")
             return
-
         chosen = dlg.result
-        # Persist the model name so we never ask again
         self._cfg["model"] = chosen["model"]
         save_config(self._cfg)
         KNOWN_MODELS.add(chosen["model"].upper())
-
         threading.Thread(target=self._finish_scan, args=(chosen["index"],), daemon=True).start()
 
     def _finish_scan(self, idx: int):
         try:
-            monitors = list(get_monitors())
-            with monitors[idx] as mon:
+            with list(get_monitors())[idx] as mon:
                 current = mon.get_input_source()
         except Exception as exc:
             self.after(0, self._on_error, f"Could not read input: {exc}")
             return
-
         self.after(0, self._on_scan_done, idx, current)
 
     def _on_scan_done(self, idx: int, current: int):
         self._monitor_idx = idx
         self._current = current
-        self._selected.set(current)
-        self._set_radios("normal")
-        self._switch_btn.config(state="disabled")
-        try:
-            label = INPUT_LABELS[InputSource(current)]
-        except ValueError:
-            label = f"Source {current}"
-        self._status(f"Current: {label}")
+        self._busy = False
+        self._set_state("normal")
+        self._highlight(current)
+        self._status(f"Active: {self._label(current)}")
 
     # ----------------------------------------------------------- switching --
 
-    def _on_pick(self):
-        can_switch = self._selected.get() != self._current
-        self._switch_btn.config(state="normal" if can_switch else "disabled")
-
-    def _switch(self):
-        val = self._selected.get()
-        self._set_radios("disabled")
-        self._switch_btn.config(state="disabled")
-        try:
-            label = INPUT_LABELS[InputSource(val)]
-        except ValueError:
-            label = f"Source {val}"
-        self._status(f"Switching to {label}…")
-        threading.Thread(target=self._do_switch, args=(val,), daemon=True).start()
+    def _on_click(self, src: InputSource):
+        if self._busy or src.value == self._current:
+            return
+        self._busy = True
+        self._set_state("disabled")
+        self._status(f"Switching to {self._label(src.value)}…")
+        threading.Thread(target=self._do_switch, args=(src.value,), daemon=True).start()
 
     def _do_switch(self, val: int):
         try:
-            monitors = list(get_monitors())
-            with monitors[self._monitor_idx] as mon:
+            with list(get_monitors())[self._monitor_idx] as mon:
                 mon.set_input_source(val)
             self.after(0, self._on_switched, val)
         except Exception as exc:
@@ -275,17 +300,23 @@ class App(tk.Tk):
 
     def _on_switched(self, val: int):
         self._current = val
-        try:
-            label = INPUT_LABELS[InputSource(val)]
-        except ValueError:
-            label = f"Source {val}"
-        self._status(f"Switched to {label}.")
-        self._refresh()
+        self._busy = False
+        self._set_state("normal")
+        self._highlight(val)
+        self._status(f"Active: {self._label(val)}")
 
     # ---------------------------------------------------------------- misc --
 
+    def _label(self, val: int) -> str:
+        try:
+            return INPUT_LABELS[InputSource(val)]
+        except ValueError:
+            return f"Source {val}"
+
     def _on_error(self, msg: str):
+        self._busy = False
         self._status(msg)
+        from tkinter import messagebox
         messagebox.showerror("Input Switcher", msg)
 
     def _status(self, msg: str):
