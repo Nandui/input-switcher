@@ -177,6 +177,10 @@ if IS_MAC:
                     if not self._cfg.get("model"):
                         self._cfg["model"] = found["model"]
                         save_config(self._cfg)
+                    try:
+                        self._current = mac_get_input(self._monitor_idx)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
